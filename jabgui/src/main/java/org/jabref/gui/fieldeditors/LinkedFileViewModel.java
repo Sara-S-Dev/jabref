@@ -18,6 +18,8 @@ import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.StringProperty;
 import javafx.scene.Node;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
 
 import org.jabref.gui.AbstractViewModel;
 import org.jabref.gui.DialogService;
@@ -37,6 +39,7 @@ import org.jabref.logic.FilePreferences;
 import org.jabref.logic.externalfiles.LinkedFileHandler;
 import org.jabref.logic.l10n.Localization;
 import org.jabref.logic.util.TaskExecutor;
+import org.jabref.logic.util.io.FileNameUniqueness;
 import org.jabref.logic.util.io.FileUtil;
 import org.jabref.model.database.BibDatabaseContext;
 import org.jabref.model.entry.BibEntry;
@@ -268,20 +271,33 @@ public class LinkedFileViewModel extends AbstractViewModel {
         boolean overwriteFile = false;
 
         if (existingFile.isPresent()) {
-            overwriteFile = dialogService.showConfirmationDialogAndWait(
-                    Localization.lang("Target file already exists"),
-                    Localization.lang("'%0' exists. Overwrite file?", targetFileName),
-                    Localization.lang("Overwrite"));
+            ButtonType overwrite = new ButtonType(Localization.lang("Overwrite"));
+            ButtonType keepBoth = new ButtonType(Localization.lang("Keep both"));
+            ButtonType cancel = ButtonType.CANCEL;
 
-            if (!overwriteFile) {
-                return;
+            Optional<ButtonType> result = dialogService.showCustomButtonDialogAndWait(
+                    Alert.AlertType.CONFIRMATION,
+                    Localization.lang("Target file already exists"),
+                    Localization.lang("'%0' exists. What do you want to do?", targetFileName),
+                    overwrite, keepBoth, cancel);
+
+            if (result.isEmpty() || result.get() == cancel) {
+                return; // User canceled, exit the method
+            } else if (result.get() == keepBoth) {
+                Path targetDirectory = linkedFile.findIn(databaseContext, preferences.getFilePreferences()).get().getParent();
+                targetFileName = FileNameUniqueness.getNonOverWritingFileName(targetDirectory, targetFileName);
+            } else if (result.get() == overwrite) {
+                overwriteFile = true; // Set overwrite flag
             }
         }
 
+        // Execute renaming **after** handling all user choices
         try {
             linkedFileHandler.renameToName(targetFileName, overwriteFile);
         } catch (IOException e) {
-            dialogService.showErrorDialogAndWait(Localization.lang("Rename failed"), Localization.lang("JabRef cannot access the file because it is being used by another process."));
+            dialogService.showErrorDialogAndWait(
+                    Localization.lang("Rename failed"),
+                    Localization.lang("JabRef cannot access the file because it is being used by another process."));
         }
     }
 
